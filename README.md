@@ -7,6 +7,8 @@ This repository contains n8n workflow automation setup with AI-powered sales wor
 ### Railway (Recommended)
 [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/Aneaire/N8N-instance)
 
+**🚀 Live Demo:** [https://n8n-instance-production-9885.up.railway.app](https://n8n-instance-production-9885.up.railway.app)
+
 **One-click deployment:**
 1. Click the "Deploy on Railway" button above
 2. Connect your GitHub account
@@ -124,8 +126,9 @@ In n8n, set up the following credentials:
 1. In your HubSpot account, go to Settings → Integrations → Webhooks
 2. Create a new webhook subscription
 3. Subscribe to "Contact property change" events
-4. Set the target URL to: `http://your-n8n-domain:5678/webhook/hubspot-webhook`
-5. Replace `your-n8n-domain` with your actual n8n domain
+4. Set the target URL to: `https://n8n-instance-production-9885.up.railway.app/webhook/hubspot-webhook`
+   - **Example for Railway deployment**: `https://n8n-instance-production-9885.up.railway.app/webhook/hubspot-webhook`
+   - **For local development**: `http://localhost:5678/webhook/hubspot-webhook`
 
 ### 7. Create Custom HubSpot Properties
 
