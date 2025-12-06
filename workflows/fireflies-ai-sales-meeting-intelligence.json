@@ -1,0 +1,328 @@
+{
+  "name": "Fireflies AI Sales Meeting Intelligence",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fireflies-meeting-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Fireflies Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "fireflies-meeting-webhook"
+    },
+    {
+      "parameters": {
+        "url": "https://api.fireflies.ai/graphql",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.firefliesApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "raw",
+        "specifyBody": "json",
+        "body": "{\n  \"query\": \"query GetTranscripts($date: DateTime) { transcripts(date: $date) { id title participants { name email } date duration } }\",\n  \"variables\": {\n    \"date\": \"{{ new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString() }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "get-meetings",
+      "name": "Get Recent Meetings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "firefliesApi": {
+          "id": "fireflies-api-key",
+          "name": "Fireflies API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.fireflies.ai/graphql",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.firefliesApi.apiKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "raw",
+        "specifyBody": "json",
+        "body": "{\n  \"query\": \"query GetTranscript($transcriptId: String!) { transcript(id: $transcriptId) { id title transcript sentences { text start_time end_time speaker_name } participants { name email } date duration } }\",\n  \"variables\": {\n    \"transcriptId\": \"{{ $json.id }}\"\n  }\n}",
+        "options": {}
+      },
+      "id": "get-transcript",
+      "name": "Get Meeting Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 200],
+      "credentials": {
+        "firefliesApi": {
+          "id": "fireflies-api-key",
+          "name": "Fireflies API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gemini-1.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are an expert sales intelligence analyst specializing in meeting analysis. Analyze sales meeting transcripts and provide actionable insights for sales teams.\n\nYour task is to extract key sales intelligence from meeting transcripts including:\n- Deal status and probability\n- Buying signals and interest indicators\n- Objections and concerns\n- Action items and commitments\n- Sentiment and engagement level\n- Key topics discussed\n- Decision makers identified\n- Specific recommendations for sales follow-up\n\nAlways provide structured, actionable insights that sales teams can immediately use to advance deals."
+            },
+            {
+              "role": "user",
+              "content": "Analyze this sales meeting transcript and provide comprehensive sales intelligence:\n\nMEETING DETAILS:\nTitle: {{ $json.title }}\nParticipants: {{ $json.participants.map(p => p.name + ' (' + p.email + ')').join(', ') }}\nDuration: {{ Math.round($json.duration / 60) }} minutes\nDate: {{ new Date($json.date).toLocaleString() }}\n\nTRANSCRIPT:\n{{ $json.transcript }}\n\nPlease provide:\n1. Current deal status and close probability (0-100%)\n2. Key buying signals identified\n3. Any objections or concerns raised\n4. Action items and commitments made\n5. Overall sentiment (positive/neutral/negative)\n6. Main topics discussed\n7. Decision makers and their roles\n8. Specific sales recommendations and urgency level\n\nFormat your response as JSON with these exact keys: dealStatus, probability, buyingSignals, objections, actionItems, sentiment, keyTopics, decisionMakers, recommendations, urgency, summary"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 2000,
+          "topP": 0.9,
+          "topK": 40
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [1120, 200],
+      "id": "gemini-ai-analysis",
+      "name": "Gemini AI Sales Analysis"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare email data from AI analysis\nconst aiResponse = $input.first().json;\nconst meetingData = $input.last().json;\n\n// Parse AI response (assuming it's JSON)\nlet analysis;\ntry {\n  if (typeof aiResponse.output === 'string') {\n    analysis = JSON.parse(aiResponse.output);\n  } else {\n    analysis = aiResponse.output || aiResponse;\n  }\n} catch (e) {\n  analysis = {\n    dealStatus: 'unknown',\n    probability: 0,\n    buyingSignals: [],\n    objections: [],\n    actionItems: [],\n    sentiment: 'neutral',\n    keyTopics: [],\n    decisionMakers: [],\n    recommendations: ['Review transcript manually'],\n    urgency: 'medium',\n    summary: 'AI analysis failed - please review transcript manually'\n  };\n}\n\n// Format meeting details\nconst meetingTitle = meetingData.title || 'Untitled Meeting';\nconst participants = meetingData.participants || [];\nconst duration = Math.round((meetingData.duration || 0) / 60);\nconst meetingDate = new Date(meetingData.date).toLocaleString();\n\n// Create email subject\nconst probability = analysis.probability || 0;\nconst dealStatus = analysis.dealStatus || 'unknown';\nconst subject = `🚀 Sales Meeting: ${meetingTitle} - ${dealStatus.charAt(0).toUpperCase() + dealStatus.slice(1)} (${probability}% probability)`;\n\n// Create HTML email content\nconst htmlContent = `\n  <div style=\"font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;\">\n    <h1 style=\"color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px;\">Sales Meeting Intelligence Report</h1>\n    \n    <div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;\">\n      <h2 style=\"margin-top: 0; color: #495057;\">Meeting Overview</h2>\n      <p><strong>Title:</strong> ${meetingTitle}</p>\n      <p><strong>Participants:</strong> ${participants.map(p => p.name).join(', ')}</p>\n      <p><strong>Duration:</strong> ${duration} minutes</p>\n      <p><strong>Date:</strong> ${meetingDate}</p>\n    </div>\n    \n    <div style=\"background-color: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #2196f3;\">\n      <h2 style=\"margin-top: 0; color: #0d47a1;\">Deal Status & Probability</h2>\n      <p style=\"font-size: 18px; font-weight: bold; color: ${probability >= 80 ? '#4caf50' : probability >= 50 ? '#ff9800' : '#f44336'};\">Status: ${dealStatus.charAt(0).toUpperCase() + dealStatus.slice(1)} | Probability: ${probability}%</p>\n      <p><strong>Summary:</strong> ${analysis.summary || 'No summary available'}</p>\n    </div>\n    \n    ${analysis.buyingSignals && analysis.buyingSignals.length > 0 ? `\n    <div style=\"background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #4caf50;\">\n      <h3 style=\"margin-top: 0; color: #2e7d32;\">✅ Buying Signals</h3>\n      <ul>\n        ${analysis.buyingSignals.map(signal => `<li>${signal}</li>`).join('')}\n      </ul>\n    </div>\n    ` : ''}\n    \n    ${analysis.objections && analysis.objections.length > 0 ? `\n    <div style=\"background-color: #ffebee; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #f44336;\">\n      <h3 style=\"margin-top: 0; color: #c62828;\">⚠️ Objections & Concerns</h3>\n      <ul>\n        ${analysis.objections.map(obj => `<li>${obj}</li>`).join('')}\n      </ul>\n    </div>\n    ` : ''}\n    \n    ${analysis.actionItems && analysis.actionItems.length > 0 ? `\n    <div style=\"background-color: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ff9800;\">\n      <h3 style=\"margin-top: 0; color: #e65100;\">📋 Action Items</h3>\n      <ul>\n        ${analysis.actionItems.map(item => `<li>${item}</li>`).join('')}\n      </ul>\n    </div>\n    ` : ''}\n    \n    <div style=\"background-color: #f3e5f5; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #9c27b0;\">\n      <h3 style=\"margin-top: 0; color: #7b1fa2;\">🎯 AI Recommendations</h3>\n      <p><strong>Urgency:</strong> <span style=\"color: ${analysis.urgency === 'high' ? '#f44336' : analysis.urgency === 'medium' ? '#ff9800' : '#4caf50'}; font-weight: bold;\">${analysis.urgency.charAt(0).toUpperCase() + analysis.urgency.slice(1)}</span></p>\n      <ul>\n        ${analysis.recommendations ? analysis.recommendations.map(rec => `<li>${rec}</li>`).join('') : '<li>No specific recommendations provided</li>'}\n      </ul>\n    </div>\n    \n    ${analysis.keyTopics && analysis.keyTopics.length > 0 ? `\n    <div style=\"background-color: #e0f2f1; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #009688;\">\n      <h3 style=\"margin-top: 0; color: #00695c;\">💬 Key Topics Discussed</h3>\n      <ul>\n        ${analysis.keyTopics.map(topic => `<li>${topic}</li>`).join('')}\n      </ul>\n    </div>\n    ` : ''}\n    \n    <div style=\"margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; color: #6c757d; font-size: 12px;\">\n      <p>This analysis was generated automatically by AI from the meeting transcript. Please review and follow up accordingly.</p>\n      <p><em>Generated by Fireflies AI Sales Intelligence System</em></p>\n    </div>\n  </div>\n`;\n\nreturn {\n  subject: subject,\n  htmlContent: htmlContent,\n  meetingTitle: meetingTitle,\n  analysis: analysis,\n  meetingData: meetingData\n};"
+      },
+      "id": "prepare-email-data",
+      "name": "Prepare Email Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "toEmail": "={{ $json.salesTeamEmails.join(',') }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.htmlContent }}"
+      },
+      "id": "send-sales-email",
+      "name": "Send Sales Intelligence Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1560, 200],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials",
+          "name": "SMTP Email"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "salesTeamEmails",
+              "value": "sales1@company.com,sales2@company.com,manager@company.com"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "email-config",
+      "name": "Sales Team Email Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.2,
+      "position": [1560, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"status\": \"success\", \"message\": \"Meeting analysis completed and email sent\", \"timestamp\": \"{{ new Date().toISOString() }}\" }"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract transcripts array from GraphQL response\nconst response = $input.first().json;\n\n// Handle Fireflies GraphQL response structure\nlet transcripts = [];\nif (response.data && response.data.transcripts) {\n  transcripts = response.data.transcripts;\n} else if (response.transcripts) {\n  transcripts = response.transcripts;\n} else if (Array.isArray(response)) {\n  transcripts = response;\n}\n\n// Filter out any transcripts that might be duplicates or already processed\n// For now, return all - in production you might want to track processed IDs\nreturn transcripts;"
+      },
+      "id": "extract-meetings-array",
+      "name": "Extract Meetings Array",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "items": "={{ $json }}",
+        "options": {}
+      },
+      "id": "loop-over-meetings",
+      "name": "Loop Over Meetings",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [900, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract transcript data from GraphQL response\nconst response = $input.first().json;\n\n// Handle Fireflies GraphQL response structure\nlet transcriptData = {};\nif (response.data && response.data.transcript) {\n  transcriptData = response.data.transcript;\n} else if (response.transcript) {\n  transcriptData = response.transcript;\n} else {\n  transcriptData = response;\n}\n\n// Format transcript text from sentences array\nlet transcriptText = '';\nif (transcriptData.sentences && Array.isArray(transcriptData.sentences)) {\n  transcriptText = transcriptData.sentences.map(sentence => \n    `${sentence.speaker_name}: ${sentence.text}`\n  ).join('\\n');\n} else if (transcriptData.transcript) {\n  transcriptText = transcriptData.transcript;\n}\n\n// Return formatted data for AI analysis\nreturn {\n  id: transcriptData.id,\n  title: transcriptData.title || 'Untitled Meeting',\n  transcript: transcriptText,\n  participants: transcriptData.participants || [],\n  date: transcriptData.date,\n  duration: transcriptData.duration || 0\n};"
+      },
+      "id": "format-transcript-data",
+      "name": "Format Transcript Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Recent Meetings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Recent Meetings": {
+      "main": [
+        [
+          {
+            "node": "Extract Meetings Array",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Meetings Array": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Meetings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Meetings": {
+      "main": [
+        [
+          {
+            "node": "Get Meeting Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Meeting Transcript": {
+      "main": [
+        [
+          {
+            "node": "Format Transcript Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Transcript Data": {
+      "main": [
+        [
+          {
+            "node": "Gemini AI Sales Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini AI Sales Analysis": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Data": {
+      "main": [
+        [
+          {
+            "node": "Send Sales Intelligence Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Sales Intelligence Email": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sales Team Email Configuration": {
+      "main": [
+        [
+          {
+            "node": "Send Sales Intelligence Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}

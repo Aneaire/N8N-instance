@@ -1,0 +1,545 @@
+{
+  "name": "HubSpot AI Lead Qualification System",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "hubspot-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "hubspot-contact-webhook"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 500]
+    },
+    {
+      "parameters": {
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.hubSpotApi.privateAppToken }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "properties",
+              "value": "email,firstname,lastname,jobtitle,company,hs_lifecyclestage,hs_analytics_num_page_views,hs_analytics_num_visits,lastmodifieddate,hs_analytics_last_url,lead_score"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-contacts-batch",
+      "name": "Get Contacts (Batch)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 500],
+      "credentials": {
+        "hubSpotApi": {
+          "id": "hubspot-credentials",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/{{ $json.properties.hs_object_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.hubSpotApi.privateAppToken }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "properties",
+              "value": "email,firstname,lastname,jobtitle,company,hs_lifecyclestage,hs_analytics_num_page_views,hs_analytics_num_visits,lastmodifieddate,hs_analytics_last_url,lead_score"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-contact-webhook",
+      "name": "Get Contact (Webhook)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "credentials": {
+        "hubSpotApi": {
+          "id": "hubspot-credentials",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.hubapi.com/crm/v3/objects/engagements",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.hubSpotApi.privateAppToken }}"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "associations",
+              "value": "contact"
+            },
+            {
+              "name": "archived",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-engagements",
+      "name": "Get Engagements",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "credentials": {
+        "hubSpotApi": {
+          "id": "hubspot-credentials",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare data for AI analysis\nconst webhookData = $input.first().json;\nconst batchData = $input.last().json;\n\nlet contacts = [];\nlet source = 'unknown';\n\n// Determine data source and prepare contact data\nif (webhookData && webhookData.properties && webhookData.properties.hs_object_id) {\n  // Webhook triggered\n  source = 'webhook';\n  const engagementData = batchData;\n  \n  let contact;\n  if (webhookData.id) {\n    contact = webhookData;\n  } else {\n    contact = webhookData.results ? webhookData.results[0] : webhookData;\n  }\n  \n  const props = contact.properties || {};\n  \n  contacts.push({\n    contactId: contact.id,\n    email: props.email,\n    name: `${props.firstname || ''} ${props.lastname || ''}`.trim(),\n    company: props.company,\n    jobTitle: props.jobtitle,\n    pageViews: parseInt(props.hs_analytics_num_page_views) || 0,\n    visits: parseInt(props.hs_analytics_num_visits) || 0,\n    lastUrl: props.hs_analytics_last_url || '',\n    lastActivity: props.lastmodifieddate,\n    lifecycleStage: props.hs_lifecyclestage,\n    engagements: engagementData && engagementData.results ? engagementData.results : [],\n    source: 'webhook'\n  });\n  \n} else if (batchData && batchData.results) {\n  // Batch processing\n  source = 'batch';\n  \n  for (const contact of batchData.results) {\n    const props = contact.properties || {};\n    \n    // Skip if already scored recently (unless score is low)\n    const currentScore = parseInt(props.lead_score) || 0;\n    if (currentScore >= 80) {\n      continue; // Skip high-scoring contacts\n    }\n    \n    contacts.push({\n      contactId: contact.id,\n      email: props.email,\n      name: `${props.firstname || ''} ${props.lastname || ''}`.trim(),\n      company: props.company,\n      jobTitle: props.jobtitle,\n      currentScore: currentScore,\n      pageViews: parseInt(props.hs_analytics_num_page_views) || 0,\n      visits: parseInt(props.hs_analytics_num_visits) || 0,\n      lastUrl: props.hs_analytics_last_url || '',\n      lastActivity: props.lastmodifieddate,\n      lifecycleStage: props.hs_lifecyclestage,\n      daysSinceActivity: Math.floor((new Date() - new Date(props.lastmodifieddate)) / (1000 * 60 * 60 * 24)),\n      source: 'batch'\n    });\n  }\n}\n\nconsole.log(`Prepared ${contacts.length} contacts for AI analysis from ${source} source`);\nreturn contacts;"
+      },
+      "id": "prepare-ai-data",
+      "name": "Prepare AI Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gemini-1.5-flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "You are an expert B2B sales lead qualification AI with access to advanced analytical tools. Analyze contact data and calculate a lead score from 0-100 based on purchase intent.\n\nAVAILABLE TOOLS:\n1. company_research - Get company information (size, industry, revenue, funding)\n2. job_title_analyzer - Analyze job seniority and decision-making power\n3. behavioral_pattern_detector - Identify buying signals from digital behavior\n4. engagement_quality_scorer - Evaluate interaction significance\n5. temporal_analysis - Assess timing and recency factors\n6. competitive_intelligence - Analyze market positioning\n\nANALYSIS FRAMEWORK:\n1. Job seniority & decision-making power (Executive/VP/C-level = highest)\n2. Company firmographics & growth indicators\n3. Behavioral engagement patterns & micro-conversions\n4. Engagement quality vs quantity assessment\n5. Lifecycle stage progression validation\n6. Temporal factors & urgency signals\n7. Market context & competitive positioning\n\nReturn JSON with:\n- score: 0-100 (80+ = high intent, 50-79 = medium, <50 = low)\n- intentLevel: \"high\"/\"medium\"/\"low\"\n- confidence: 0-100 (how confident in analysis)\n- signals: array of buying signals detected\n- reasoning: detailed explanation of score\n- recommendedAction: specific sales team action\n- priority: \"immediate\"/\"high\"/\"medium\"/\"low\"\n- nextSteps: array of recommended follow-up actions\n- riskFactors: array of potential conversion barriers\n\nUse tools when available for deeper analysis. Be strategic, data-driven, and provide actionable insights."
+            },
+            {
+              "role": "user",
+              "content": "Analyze this contact for B2B lead qualification using all available tools:\n\n📊 CONTACT DATA:\nName: {{ $json.name }}\nEmail: {{ $json.email }}\nCompany: {{ $json.company }}\nJob Title: {{ $json.jobTitle }}\nPage Views: {{ $json.pageViews }}\nVisits: {{ $json.visits }}\nLast URL: {{ $json.lastUrl }}\nLifecycle Stage: {{ $json.lifecycleStage }}\nLast Activity: {{ $json.lastActivity }}\nDays Since Activity: {{ $json.daysSinceActivity || 'N/A' }}\nEngagements: {{ $json.engagements ? $json.engagements.length : 0 }} activities\nCurrent Score: {{ $json.currentScore || 0 }}\n\n🔧 AVAILABLE TOOLS:\n- company_research: Analyze company background, size, industry, funding\n- job_title_analyzer: Evaluate seniority level and decision-making authority\n- behavioral_pattern_detector: Identify micro-conversions and buying signals\n- engagement_quality_scorer: Assess interaction significance and quality\n- temporal_analysis: Analyze timing patterns and urgency indicators\n- competitive_intelligence: Research market position and competitors\n\n📋 ANALYSIS REQUEST:\n1. Use relevant tools to gather comprehensive data\n2. Apply B2B sales expertise to score 0-100\n3. Identify specific buying signals and intent indicators\n4. Provide actionable sales recommendations\n5. Assess conversion probability and risks\n6. Suggest optimal outreach strategy and timing\n\nProvide detailed AI-powered analysis with confidence levels and specific next steps."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.3,
+          "maxTokens": 2000,
+          "topP": 0.9,
+          "topK": 40
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1,
+      "position": [1120, 300],
+      "id": "gemini-ai-scorer",
+      "name": "Gemini AI Lead Scorer"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Company Research Tool\n// Simulate company research using available data and patterns\nconst companyName = $input.first().json.companyName;\nconst industry = $input.first().json.industry || '';\n\n// Simulate company research results\nconst companyPatterns = {\n  // Tech company patterns\n  'tech': {\n    avgSize: '50-200',\n    growthStage: 'Growing',\n    funding: 'Seed/Series A',\n    marketPosition: 'Emerging'\n  },\n  // Enterprise patterns\n  'enterprise': {\n    avgSize: '1000+',\n    growthStage: 'Mature',\n    funding: 'Public/Private Equity',\n    marketPosition: 'Established'\n  },\n  // Startup patterns\n  'startup': {\n    avgSize: '1-50',\n    growthStage: 'Early',\n    funding: 'Pre-Seed/Angel',\n    marketPosition: 'Disruptive'\n  }\n};\n\n// Determine company type based on name and patterns\nlet companyType = 'unknown';\nif (companyName.toLowerCase().includes('tech') || companyName.toLowerCase().includes('software') || companyName.toLowerCase().includes('solutions')) {\n  companyType = 'tech';\n} else if (companyName.toLowerCase().includes('corp') || companyName.toLowerCase().includes('inc') || companyName.toLowerCase().includes('llc')) {\n  companyType = 'enterprise';\n} else if (companyName.toLowerCase().includes('labs') || companyName.toLowerCase().includes('startup')) {\n  companyType = 'startup';\n}\n\nconst research = companyPatterns[companyType] || companyPatterns.unknown;\n\nreturn {\n  companyName: companyName,\n  industry: industry || 'Technology',\n  estimatedSize: research.avgSize,\n  growthStage: research.growthStage,\n  fundingStage: research.funding,\n  marketPosition: research.marketPosition,\n  confidence: 75,\n  dataPoints: ['Name pattern analysis', 'Industry classification', 'Size estimation'],\n  researchTimestamp: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200],
+      "id": "company-research-tool",
+      "name": "Company Research Tool"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Job Title Analyzer Tool\n// Analyze job title for seniority and decision-making power\nconst jobTitle = $input.first().json.jobTitle;\nconst company = $input.first().json.company || '';\n\n// Seniority levels and scores\nconst seniorityLevels = {\n  'c-level': {\n    titles: ['ceo', 'cto', 'cfo', 'cio', 'coo', 'cmo', 'cpo', 'chro', 'chief', 'president'],\n    score: 100,\n    decisionPower: 'Final',\n    budgetAuthority: 'Unlimited'\n  },\n  'vp-level': {\n    titles: ['vice president', 'vp', 'director'],\n    score: 85,\n    decisionPower: 'High',\n    budgetAuthority: 'High ($100K+)'\n  },\n  'manager-level': {\n    titles: ['manager', 'head', 'lead', 'principal', 'supervisor'],\n    score: 70,\n    decisionPower: 'Medium',\n    budgetAuthority: 'Medium ($10K-$100K)'\n  },\n  'senior-level': {\n    titles: ['senior', 'sr.', 'principal', 'specialist'],\n    score: 55,\n    decisionPower: 'Low-Medium',\n    budgetAuthority: 'Low ($1K-$10K)'\n  },\n  'individual-contributor': {\n    titles: ['analyst', 'associate', 'coordinator', 'assistant', 'junior', 'intern'],\n    score: 30,\n    decisionPower: 'Low',\n    budgetAuthority: 'Minimal (<$1K)'\n  }\n};\n\n// Analyze job title\nconst titleLower = jobTitle.toLowerCase();\nlet detectedLevel = 'individual-contributor';\nlet score = 30;\nlet decisionPower = 'Low';\nlet budgetAuthority = 'Minimal (<$1K)';\n\nfor (const [level, data] of Object.entries(seniorityLevels)) {\n  for (const titleKeyword of data.titles) {\n    if (titleLower.includes(titleKeyword)) {\n      detectedLevel = level;\n      score = data.score;\n      decisionPower = data.decisionPower;\n      budgetAuthority = data.budgetAuthority;\n      break;\n    }\n  }\n  if (detectedLevel !== 'individual-contributor') break;\n}\n\n// Additional factors\nconst hasInfluence = titleLower.includes('manager') || titleLower.includes('lead') || titleLower.includes('head');\nconst isTechnical = titleLower.includes('engineer') || titleLower.includes('developer') || titleLower.includes('architect');\nconst isBusiness = titleLower.includes('business') || titleLower.includes('sales') || titleLower.includes('marketing');\n\nreturn {\n  jobTitle: jobTitle,\n  company: company,\n  detectedLevel: detectedLevel,\n  seniorityScore: score,\n  decisionPower: decisionPower,\n  budgetAuthority: budgetAuthority,\n  hasInfluence: hasInfluence,\n  isTechnical: isTechnical,\n  isBusiness: isBusiness,\n  confidence: 85,\n  analysis: `Detected ${detectedLevel.replace('-', ' ')} with ${decisionPower} decision-making power`,\n  analysisTimestamp: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 400],
+      "id": "job-title-analyzer-tool",
+      "name": "Job Title Analyzer Tool"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Behavioral Pattern Detector Tool\n// Detect buying signals from digital behavior patterns\nconst pageViews = $input.first().json.pageViews;\nconst visits = $input.first().json.visits;\nconst lastUrl = $input.first().json.lastUrl || '';\nconst urlHistory = $input.first().json.urlHistory || [];\n\n// Behavioral patterns and indicators\nconst patterns = {\n  highIntentUrls: ['pricing', 'demo', 'trial', 'contact', 'enterprise', 'quote', 'proposal'],\n  researchUrls: ['about', 'features', 'solutions', 'services', 'case-study', 'testimonial'],\n  productUrls: ['product', 'platform', 'tool', 'software'],\n  supportUrls: ['help', 'support', 'documentation', 'faq']\n};\n\n// Analyze URL patterns\nlet detectedPatterns = [];\nlet intentSignals = [];\nlet lastUrlCategory = 'other';\n\nfor (const [category, keywords] of Object.entries(patterns)) {\n  for (const keyword of keywords) {\n    if (lastUrl.toLowerCase().includes(keyword)) {\n      lastUrlCategory = category;\n      detectedPatterns.push(`${category}: ${keyword}`);\n      break;\n    }\n  }\n}\n\n// Calculate behavioral scores\nconst engagementRate = visits > 0 ? pageViews / visits : 0;\nconst visitFrequency = visits; // Higher is better\nconst depthScore = pageViews > 20 ? 100 : pageViews > 10 ? 75 : pageViews > 5 ? 50 : 25;\nconst frequencyScore = visits > 10 ? 100 : visits > 5 ? 75 : visits > 2 ? 50 : 25;\n\n// Detect buying signals\nif (lastUrlCategory === 'highIntentUrls') {\n  intentSignals.push('High-intent page visit (pricing/demo)');\n}\nif (engagementRate > 3) {\n  intentSignals.push('High engagement rate (deep browsing)');\n}\nif (visits > 5) {\n  intentSignals.push('Multiple return visits');\n}\nif (pageViews > 15) {\n  intentSignals.push('Extensive research behavior');\n}\n\n// Calculate overall behavioral score\nconst behavioralScore = (depthScore * 0.6) + (frequencyScore * 0.4);\n\nreturn {\n  pageViews: pageViews,\n  visits: visits,\n  lastUrl: lastUrl,\n  lastUrlCategory: lastUrlCategory,\n  engagementRate: Math.round(engagementRate * 100) / 100,\n  depthScore: depthScore,\n  frequencyScore: frequencyScore,\n  behavioralScore: Math.round(behavioralScore),\n  detectedPatterns: detectedPatterns,\n  intentSignals: intentSignals,\n  buyingSignals: intentSignals.length,\n  confidence: 80,\n  analysis: `Behavioral score ${behavioralScore}/100 with ${intentSignals.length} buying signals`,\n  analysisTimestamp: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 600],
+      "id": "behavioral-pattern-detector-tool",
+      "name": "Behavioral Pattern Detector Tool"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Engagement Quality Scorer Tool\n// Evaluate quality and significance of engagement activities\nconst engagements = $input.first().json.engagements || [];\nconst currentScore = $input.first().json.engagementScore || 0;\n\n// Engagement type weights\nconst engagementWeights = {\n  'MEETING': { weight: 100, quality: 'High' },\n  'CALL': { weight: 80, quality: 'High' },\n  'EMAIL': { weight: 60, quality: 'Medium' },\n  'NOTE': { weight: 40, quality: 'Medium' },\n  'TASK': { weight: 70, quality: 'Medium-High' },\n  'FORM_SUBMISSION': { weight: 90, quality: 'High' }\n};\n\n// Analyze engagements\nlet totalScore = 0;\nlet qualityBreakdown = [];\nlet engagementTypes = [];\n\nfor (const engagement of engagements) {\n  const type = engagement.type || 'UNKNOWN';\n  const weight = engagementWeights[type] || { weight: 20, quality: 'Low' };\n  \n  totalScore += weight.weight;\n  qualityBreakdown.push(`${type}: ${weight.quality}`);\n  engagementTypes.push(type);\n  \n  // Check for high-value interactions\n  if (type === 'MEETING' && engagement.duration > 1800) { // 30+ minutes\n    totalScore += 20; // Bonus for long meetings\n  }\n  if (type === 'CALL' && engagement.duration > 600) { // 10+ minutes\n    totalScore += 15; // Bonus for substantial calls\n  }\n}\n\n// Calculate quality metrics\nconst avgEngagementQuality = totalScore > 0 ? totalScore / engagements.length : 0;\nconst engagementFrequency = engagements.length;\nconst hasHighValueEngagement = engagementTypes.some(type => ['MEETING', 'CALL', 'FORM_SUBMISSION'].includes(type));\n\n// Determine engagement level\nlet engagementLevel = 'Low';\nif (avgEngagementQuality >= 80 || hasHighValueEngagement) {\n  engagementLevel = 'High';\n} else if (avgEngagementQuality >= 60) {\n  engagementLevel = 'Medium';\n}\n\nreturn {\n  engagementCount: engagements.length,\n  engagementTypes: engagementTypes,\n  totalEngagementScore: totalScore,\n  avgEngagementQuality: Math.round(avgEngagementQuality),\n  engagementLevel: engagementLevel,\n  hasHighValueEngagement: hasHighValueEngagement,\n  qualityBreakdown: qualityBreakdown,\n  confidence: 85,\n  analysis: `${engagementLevel} engagement quality with ${engagements.length} interactions`,\n  analysisTimestamp: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 800],
+      "id": "engagement-quality-scorer-tool",
+      "name": "Engagement Quality Scorer Tool"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Temporal Analysis Tool\n// Analyze timing patterns, recency, and urgency indicators\nconst daysSinceActivity = $input.first().json.daysSinceActivity;\nconst lastActivity = $input.first().json.lastActivity || '';\nconst activityPattern = $input.first().json.activityPattern || [];\n\n// Time-based scoring factors\nconst timeFactors = {\n  urgency: {\n    veryHigh: { days: 1, score: 100, label: 'Immediate' },\n    high: { days: 3, score: 90, label: 'Urgent' },\n    medium: { days: 7, score: 75, label: 'Active' },\n    low: { days: 14, score: 50, label: 'Warm' },\n    veryLow: { days: 30, score: 25, label: 'Cold' },\n    stale: { days: 60, score: 10, label: 'Stale' }\n  }\n};\n\n// Determine urgency level\nlet urgencyLevel = 'low';\nlet timeScore = 25;\nlet urgencyLabel = 'Cold';\n\nfor (const [level, data] of Object.entries(timeFactors)) {\n  if (daysSinceActivity <= data.days) {\n    urgencyLevel = level;\n    timeScore = data.score;\n    urgencyLabel = data.label;\n    break;\n  }\n}\n\n// Analyze activity patterns if available\nlet patternAnalysis = 'No pattern data';\nif (activityPattern.length > 0) {\n  const recentActivity = activityPattern.slice(-7).reduce((sum, val) => sum + val, 0);\n  const avgRecentActivity = recentActivity / Math.min(7, activityPattern.length);\n  \n  if (avgRecentActivity > 5) {\n    patternAnalysis = 'High recent activity pattern';\n    timeScore += 15;\n  } else if (avgRecentActivity > 2) {\n    patternAnalysis = 'Moderate recent activity pattern';\n    timeScore += 5;\n  }\n}\n\n// Calculate recency bonus/penalty\nlet recencyAdjustment = 0;\nif (daysSinceActivity <= 3) {\n  recencyAdjustment = 20; // Bonus for very recent activity\n} else if (daysSinceActivity >= 45) {\n  recencyAdjustment = -15; // Penalty for stale activity\n}\n\nconst finalTimeScore = Math.max(0, Math.min(100, timeScore + recencyAdjustment));\n\nreturn {\n  daysSinceActivity: daysSinceActivity,\n  lastActivity: lastActivity,\n  urgencyLevel: urgencyLevel,\n  urgencyLabel: urgencyLabel,\n  timeScore: finalTimeScore,\n  recencyAdjustment: recencyAdjustment,\n  patternAnalysis: patternAnalysis,\n  isVeryRecent: daysSinceActivity <= 3,\n  isStale: daysSinceActivity >= 45,\n  confidence: 90,\n  analysis: `${urgencyLabel} timing with ${finalTimeScore}/100 time score`,\n  analysisTimestamp: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 1000],
+      "id": "temporal-analysis-tool",
+      "name": "Temporal Analysis Tool"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Competitive Intelligence Tool\n// Research competitive landscape and market positioning\nconst company = $input.first().json.company;\nconst industry = $input.first().json.industry || 'Technology';\n\n// Simulate competitive intelligence based on industry patterns\nconst competitiveData = {\n  'Technology': {\n    avgCompetitors: 15,\n    marketSaturation: 'High',\n    growthRate: '15-25%',\n    barriers: 'High innovation requirements',\n    opportunities: 'AI integration, sustainability focus'\n  },\n  'Healthcare': {\n    avgCompetitors: 8,\n    marketSaturation: 'Medium',\n    growthRate: '8-12%',\n    barriers: 'Regulatory compliance',\n    opportunities: 'Telemedicine, aging population'\n  },\n  'Finance': {\n    avgCompetitors: 12,\n    marketSaturation: 'High',\n    growthRate: '5-10%',\n    barriers: 'Trust and regulation',\n    opportunities: 'Digital transformation, ESG'\n  },\n  'Manufacturing': {\n    avgCompetitors: 10,\n    marketSaturation: 'Medium',\n    growthRate: '3-8%',\n    barriers: 'Supply chain complexity',\n    opportunities: 'IoT, automation'\n  }\n};\n\nconst industryData = competitiveData[industry] || competitiveData.Technology;\n\n// Analyze company positioning\nlet positioningScore = 50; // Default neutral\nlet positioning = 'Mid-market';\n\n// Simulate positioning analysis based on company characteristics\nif (company.toLowerCase().includes('global') || company.toLowerCase().includes('international')) {\n  positioningScore = 75;\n  positioning = 'Global player';\n} else if (company.toLowerCase().includes('local') || company.toLowerCase().includes('regional')) {\n  positioningScore = 35;\n  positioning = 'Local focus';\n} else if (company.toLowerCase().includes('enterprise') || company.toLowerCase().includes('corp')) {\n  positioningScore = 65;\n  positioning = 'Enterprise focus';\n}\n\n// Calculate competitive advantage\nconst competitiveAdvantage = Math.max(0, positioningScore - 40);\nconst marketDifficulty = industryData.marketSaturation === 'High' ? 80 : industryData.marketSaturation === 'Medium' ? 60 : 40;\n\nreturn {\n  company: company,\n  industry: industry,\n  avgCompetitors: industryData.avgCompetitors,\n  marketSaturation: industryData.marketSaturation,\n  growthRate: industryData.growthRate,\n  barriers: industryData.barriers,\n  opportunities: industryData.opportunities,\n  positioningScore: positioningScore,\n  positioning: positioning,\n  competitiveAdvantage: competitiveAdvantage,\n  marketDifficulty: marketDifficulty,\n  confidence: 70,\n  analysis: `${positioning} positioning in ${industryData.marketSaturation.toLowerCase()} market`,\n  analysisTimestamp: new Date().toISOString()\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 1200],
+      "id": "competitive-intelligence-tool",
+      "name": "Competitive Intelligence Tool"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process enhanced AI response with tools data\nconst aiResponse = $input.first().json;\nconst contactData = $input.last().json;\n\ntry {\n  // Parse AI response\n  let aiAnalysis;\n  if (typeof aiResponse.output === 'string') {\n    aiAnalysis = JSON.parse(aiResponse.output);\n  } else {\n    aiAnalysis = aiResponse.output || aiResponse;\n  }\n  \n  // Ensure we have valid analysis\n  if (!aiAnalysis || typeof aiAnalysis !== 'object') {\n    throw new Error('Invalid AI response format');\n  }\n  \n  // Extract tool usage information\n  const toolsUsed = [];\n  if (aiAnalysis.companyResearch) toolsUsed.push('Company Research');\n  if (aiAnalysis.jobAnalysis) toolsUsed.push('Job Title Analysis');\n  if (aiAnalysis.behavioralAnalysis) toolsUsed.push('Behavioral Patterns');\n  if (aiAnalysis.engagementQuality) toolsUsed.push('Engagement Quality');\n  if (aiAnalysis.temporalAnalysis) toolsUsed.push('Temporal Analysis');\n  if (aiAnalysis.competitiveIntel) toolsUsed.push('Competitive Intelligence');\n  \n  // Format enhanced result for workflow\n  const result = {\n    contactId: contactData.contactId,\n    email: contactData.email,\n    name: contactData.name,\n    company: contactData.company,\n    jobTitle: contactData.jobTitle,\n    score: aiAnalysis.score || 0,\n    intentLevel: aiAnalysis.intentLevel || 'low',\n    confidence: aiAnalysis.confidence || 50,\n    priority: aiAnalysis.priority || 'medium',\n    signals: aiAnalysis.signals || [],\n    reasoning: aiAnalysis.reasoning || 'AI analysis completed',\n    recommendedAction: aiAnalysis.recommendedAction || 'Continue monitoring',\n    nextSteps: aiAnalysis.nextSteps || [],\n    riskFactors: aiAnalysis.riskFactors || [],\n    toolsUsed: toolsUsed,\n    currentScore: contactData.currentScore || 0,\n    newScore: aiAnalysis.score || 0,\n    scoreChange: (aiAnalysis.score || 0) - (contactData.currentScore || 0),\n    pageViews: contactData.pageViews,\n    visits: contactData.visits,\n    lastUrl: contactData.lastUrl,\n    lastActivity: contactData.lastActivity,\n    lifecycleStage: contactData.lifecycleStage,\n    daysSinceActivity: contactData.daysSinceActivity,\n    timestamp: new Date().toISOString(),\n    source: contactData.source,\n    aiProcessed: true,\n    analysisDepth: toolsUsed.length > 2 ? 'comprehensive' : toolsUsed.length > 0 ? 'standard' : 'basic'\n  };\n  \n  console.log(`🤖 Enhanced AI Analysis for ${result.name}:`);\n  console.log(`   Score: ${result.score}/100 (${result.intentLevel} intent, ${result.confidence}% confidence)`);\n  console.log(`   Priority: ${result.priority}, Tools Used: ${toolsUsed.join(', ')}`);\n  console.log(`   Reasoning: ${result.reasoning}`);\n  \n  return result;\n  \n} catch (error) {\n  console.error('❌ Error processing enhanced AI response:', error);\n  \n  // Enhanced fallback scoring if AI fails\n  const fallbackScore = contactData.pageViews > 15 ? 70 : contactData.pageViews > 8 ? 50 : 30;\n  const fallbackIntent = fallbackScore >= 80 ? 'high' : fallbackScore >= 50 ? 'medium' : 'low';\n  const fallbackConfidence = 60; // Moderate confidence for fallback\n  \n  return {\n    contactId: contactData.contactId,\n    email: contactData.email,\n    name: contactData.name,\n    company: contactData.company,\n    jobTitle: contactData.jobTitle,\n    score: fallbackScore,\n    intentLevel: fallbackIntent,\n    confidence: fallbackConfidence,\n    priority: fallbackScore >= 80 ? 'immediate' : fallbackScore >= 50 ? 'high' : 'medium',\n    signals: ['AI processing failed - using enhanced fallback scoring'],\n    reasoning: 'AI analysis failed, used advanced behavioral scoring with heuristics',\n    recommendedAction: 'Review manually and consider technical issues',\n    nextSteps: ['Verify AI service status', 'Manual review recommended'],\n    riskFactors: ['AI analysis unavailable', 'Potential scoring inaccuracy'],\n    toolsUsed: [],\n    currentScore: contactData.currentScore || 0,\n    newScore: fallbackScore,\n    scoreChange: fallbackScore - (contactData.currentScore || 0),\n    pageViews: contactData.pageViews,\n    visits: contactData.visits,\n    lastUrl: contactData.lastUrl,\n    lastActivity: contactData.lastActivity,\n    lifecycleStage: contactData.lifecycleStage,\n    daysSinceActivity: contactData.daysSinceActivity,\n    timestamp: new Date().toISOString(),\n    source: contactData.source,\n    aiProcessed: false,\n    analysisDepth: 'fallback',\n    error: error.message\n  };\n}"
+      },
+      "id": "process-ai-response",
+      "name": "Process AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "high-intent-condition",
+              "leftValue": "={{ $json.intentLevel }}",
+              "rightValue": "high",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-high-intent",
+      "name": "Filter High-Intent Leads",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.hubapi.com/crm/v3/objects/contacts/{{ $json.contactId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $credentials.hubSpotApi.privateAppToken }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "properties",
+              "value": "={{ {\"lead_score\": ($json.newScore || $json.score).toString(), \"intent_level\": $json.intentLevel, \"last_scored_date\": new Date().toISOString()} }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-contact",
+      "name": "Update Contact in HubSpot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 200],
+      "credentials": {
+        "hubSpotApi": {
+          "id": "hubspot-credentials",
+          "name": "HubSpot API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare enhanced AI email notifications with tools data\nconst leads = $input.all();\n\nif (leads.length === 0) {\n  return [{ message: 'No high-intent leads to process' }];\n}\n\nconst firstLead = leads[0].json;\nconst isWebhook = firstLead.source === 'webhook';\n\nif (isWebhook && leads.length === 1) {\n  // Single lead notification (webhook trigger)\n  const lead = firstLead;\n  const confidenceColor = lead.confidence >= 80 ? '#4caf50' : lead.confidence >= 60 ? '#ff9800' : '#f44336';\n  const priorityColor = lead.priority === 'immediate' ? '#d32f2f' : lead.priority === 'high' ? '#f57c00' : lead.priority === 'medium' ? '#fbc02d' : '#388e3c';\n  const depthBadge = lead.analysisDepth === 'comprehensive' ? '🔬 Deep Analysis' : lead.analysisDepth === 'standard' ? '🧠 Standard Analysis' : '⚡ Quick Analysis';\n  \n  const toolsSection = lead.toolsUsed && lead.toolsUsed.length > 0 ? `\n    <h3>🛠️ AI Tools Used:</h3>\n    <div style=\"background-color: #f8f9fa; border-left: 4px solid #007bff; padding: 10px; margin: 10px 0;\">\n      ${lead.toolsUsed.map(tool => `<span style=\"background-color: #007bff; color: white; padding: 2px 6px; border-radius: 3px; margin: 2px; font-size: 11px;\">${tool}</span>`).join(' ')}\n    </div>\n  ` : '';\n  \n  const riskSection = lead.riskFactors && lead.riskFactors.length > 0 ? `\n    <h3>⚠️ Risk Factors:</h3>\n    <div style=\"background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 10px; margin: 10px 0;\">\n      ${lead.riskFactors.map(risk => `<li>⚠️ ${risk}</li>`).join('')}\n    </div>\n  ` : '';\n  \n  const nextStepsSection = lead.nextSteps && lead.nextSteps.length > 0 ? `\n    <h3>📋 AI-Recommended Next Steps:</h3>\n    <div style=\"background-color: #d1ecf1; border-left: 4px solid #17a2b8; padding: 10px; margin: 10px 0;\">\n      <ol>\n        ${lead.nextSteps.map(step => `<li>${step}</li>`).join('')}\n      </ol>\n    </div>\n  ` : '';\n  \n  return {\n    subject: `🤖 Enhanced AI Lead Alert: ${lead.name} from ${lead.company} (${lead.score}/100)`,\n    htmlContent: `\n      <h2>🤖 Advanced AI Lead Analysis ${depthBadge}</h2>\n      <p>Our enhanced AI with ${lead.toolsUsed.length} specialized tools has identified a high-intent lead.</p>\n      \n      <div style=\"display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0;\">\n        <div style=\"background-color: #e3f2fd; padding: 15px; border-radius: 8px;\">\n          <h4 style=\"margin: 0 0 10px 0; color: #1976d2;\">📊 Score Analysis</h4>\n          <p><strong>Score:</strong> <span style=\"font-size: 24px; color: #4caf50;\">${lead.score}/100</span></p>\n          <p><strong>Intent:</strong> <span style=\"background-color: #ff6b6b; color: white; padding: 4px 8px; border-radius: 4px;\">${lead.intentLevel.toUpperCase()}</span></p>\n          <p><strong>Confidence:</strong> <span style=\"color: ${confidenceColor}; font-weight: bold;\">${lead.confidence}%</span></p>\n          <p><strong>Priority:</strong> <span style=\"background-color: ${priorityColor}; color: white; padding: 4px 8px; border-radius: 4px;\">${lead.priority.toUpperCase()}</span></p>\n        </div>\n        <div style=\"background-color: #f3e5f5; padding: 15px; border-radius: 8px;\">\n          <h4 style=\"margin: 0 0 10px 0; color: #7b1fa2;\">👤 Contact Details</h4>\n          <p><strong>Name:</strong> ${lead.name}</p>\n          <p><strong>Email:</strong> ${lead.email}</p>\n          <p><strong>Company:</strong> ${lead.company}</p>\n          <p><strong>Title:</strong> ${lead.jobTitle}</p>\n          <p><strong>Score Change:</strong> <span style=\"color: ${lead.scoreChange > 0 ? '#4caf50' : '#f44336'};\">${lead.scoreChange > 0 ? '+' : ''}${lead.scoreChange} pts</span></p>\n        </div>\n      </div>\n      \n      ${toolsSection}\n      \n      <h3>🧠 AI Reasoning:</h3>\n      <div style=\"background-color: #e8f5e8; border-left: 4px solid #4caf50; padding: 15px; margin: 10px 0;\">\n        <p><strong>Analysis:</strong> ${lead.reasoning}</p>\n      </div>\n      \n      <h3>🚀 Buying Signals Detected:</h3>\n      <div style=\"background-color: #fff3e0; padding: 15px; border-radius: 8px;\">\n        ${lead.signals.map(signal => `<span style=\"background-color: #ff9800; color: white; padding: 3px 8px; border-radius: 15px; margin: 3px; display: inline-block;\">✅ ${signal}</span>`).join(' ')}\n      </div>\n      \n      ${riskSection}\n      ${nextStepsSection}\n      \n      <div style=\"background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin: 20px 0;\">\n        <h3 style=\"margin: 0 0 10px 0;\">🤖 AI Strategic Recommendation:</h3>\n        <p style=\"margin: 0; font-size: 16px;\"><strong>${lead.recommendedAction}</strong></p>\n      </div>\n      \n      <p><em>This enhanced AI analysis was generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</em></p>\n    `,\n    type: 'individual'\n  };\n} else {\n  // Batch notification (schedule trigger)\n  const leadsList = leads.map(lead => {\n    const data = lead.json;\n    const aiBadge = data.aiProcessed ? '🤖' : '📊';\n    const scoreColor = data.score >= 80 ? '#4caf50' : data.score >= 50 ? '#ff9800' : '#f44336';\n    const confidenceColor = data.confidence >= 80 ? '#4caf50' : data.confidence >= 60 ? '#ff9800' : '#f44336';\n    const toolsCount = data.toolsUsed ? data.toolsUsed.length : 0;\n    \n    return `\n      <tr>\n        <td>${aiBadge} ${data.name}</td>\n        <td>${data.email}</td>\n        <td>${data.company}</td>\n        <td>${data.jobTitle}</td>\n        <td><strong style=\"color: ${scoreColor}; font-size: 14px;\">${data.newScore || data.score}</strong></td>\n        <td><span style=\"background-color: ${data.intentLevel === 'high' ? '#ff6b6b' : data.intentLevel === 'medium' ? '#ffa726' : '#66bb6a'}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 11px;\">${data.intentLevel.toUpperCase()}</span></td>\n        <td><span style=\"color: ${confidenceColor}; font-weight: bold;\">${data.confidence}%</span></td>\n        <td><span style=\"background-color: ${data.priority === 'immediate' ? '#d32f2f' : data.priority === 'high' ? '#f57c00' : '#388e3c'}; color: white; padding: 2px 4px; border-radius: 2px; font-size: 10px;\">${data.priority.toUpperCase()}</span></td>\n        <td>${toolsCount} tools</td>\n        <td>${data.signals.slice(0, 2).join(', ')}${data.signals.length > 2 ? '...' : ''}</td>\n        <td>${data.scoreChange > 0 ? '+' : ''}${data.scoreChange}</td>\n      </tr>`;\n  }).join('');\n  \n  const aiProcessedCount = leads.filter(lead => lead.json.aiProcessed).length;\n  const comprehensiveAnalysisCount = leads.filter(lead => lead.json.analysisDepth === 'comprehensive').length;\n  const totalToolsUsed = leads.reduce((sum, lead) => sum + (lead.json.toolsUsed ? lead.json.toolsUsed.length : 0), 0);\n  \n  return {\n    subject: `🤖 Enhanced AI Batch Alert: ${leads.length} High-Intent Leads Analyzed`,\n    htmlContent: `\n      <h2>🤖 Advanced AI Lead Analysis Report</h2>\n      <p><strong>${leads.length}</strong> high-intent leads identified with enhanced AI analysis (${aiProcessedCount} AI-processed, ${comprehensiveAnalysisCount} comprehensive analysis).</p>\n      \n      <div style=\"background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin: 20px 0;\">\n        <h3>📊 Analysis Summary:</h3>\n        <div style=\"display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;\">\n          <div><strong>Total Leads:</strong> ${leads.length}</div>\n          <div><strong>AI Processed:</strong> ${aiProcessedCount}</div>\n          <div><strong>Comprehensive:</strong> ${comprehensiveAnalysisCount}</div>\n          <div><strong>Tools Used:</strong> ${totalToolsUsed}</div>\n        </div>\n      </div>\n      \n      <h3>📋 Lead Details</h3>\n      <table border=\"1\" cellpadding=\"8\" cellspacing=\"0\" style=\"border-collapse: collapse; width: 100%; font-size: 12px;\">\n        <thead>\n          <tr style=\"background-color: #f2f2f2;\">\n            <th>Name</th>\n            <th>Email</th>\n            <th>Company</th>\n            <th>Title</th>\n            <th>Score</th>\n            <th>Intent</th>\n            <th>Confidence</th>\n            <th>Priority</th>\n            <th>Tools</th>\n            <th>Top Signals</th>\n            <th>Change</th>\n          </tr>\n        </thead>\n        <tbody>\n          ${leadsList}\n        </tbody>\n      </table>\n      \n      <h3>🧠 Top AI Insights</h3>\n      <div style=\"background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 20px 0;\">\n        ${leads.slice(0, 3).map(lead => {\n          const data = lead.json;\n          return `<div style=\"margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #bbdefb;\"><strong>${data.name}:</strong> ${data.reasoning || 'Standard analysis applied'}</div>`;\n        }).join('')}\n        ${leads.length > 3 ? `<div><em>...and ${leads.length - 3} more leads with detailed AI analysis</em></div>` : ''}\n      </div>\n      \n      <h3>🚀 Strategic Recommendations</h3>\n      <div style=\"background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin: 20px 0;\">\n        <ul style=\"margin: 0; padding-left: 20px;\">\n          <li><strong>🎯 Priority Sequencing:</strong> Focus on immediate priority leads with 80+ scores</li>\n          <li><strong>🛠️ Tool-Driven Approach:</strong> Leverage AI insights from specialized analysis tools</li>\n          <li><strong>🧠 Reasoning-Based Outreach:</strong> Reference specific AI reasoning in communications</li>\n          <li><strong>⚠️ Risk Mitigation:</strong> Address identified risk factors proactively</li>\n          <li><strong>📋 Step-by-Step:</strong> Follow AI-recommended next steps systematically</li>\n        </ul>\n      </div>\n      \n      <p><em>This enhanced AI report was generated on ${new Date().toLocaleDateString()} at ${new Date().toLocaleTimeString()}</em></p>\n    `,\n    type: 'batch'\n  };\n}"
+      },
+      "id": "prepare-email",
+      "name": "Prepare Email Notification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2220, 200]
+    },
+    {
+      "parameters": {
+        "fromEmail": "noreply@yourcompany.com",
+        "toEmail": "sales@yourcompany.com",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.htmlContent }}"
+      },
+      "id": "send-sales-alert",
+      "name": "Send Sales Alert Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [2440, 200],
+      "credentials": {
+        "smtp": {
+          "id": "smtp-credentials",
+          "name": "SMTP Email"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{ \"status\": \"success\", \"message\": \"Lead processed with AI analysis\", \"leadScore\": {{ $json.score }}, \"intentLevel\": \"{{ $json.intentLevel }}\", \"aiProcessed\": {{ $json.aiProcessed }}, \"reasoning\": \"{{ $json.reasoning }}\", \"timestamp\": \"{{ $json.timestamp }}\" }"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2000, 400]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Contact (Webhook)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Contacts (Batch)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contact (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Get Engagements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Contacts (Batch)": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Engagements": {
+      "main": [
+        [
+          {
+            "node": "Prepare AI Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare AI Data": {
+      "main": [
+        [
+          {
+            "node": "Gemini AI Lead Scorer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini AI Lead Scorer": {
+      "main": [
+        [
+          {
+            "node": "Process AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ],
+      "ai_tool": [
+        [
+          {
+            "node": "Company Research Tool",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Job Title Analyzer Tool",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Behavioral Pattern Detector Tool",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Engagement Quality Scorer Tool",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Temporal Analysis Tool",
+            "type": "ai_tool",
+            "index": 0
+          },
+          {
+            "node": "Competitive Intelligence Tool",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process AI Response": {
+      "main": [
+        [
+          {
+            "node": "Filter High-Intent Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter High-Intent Leads": {
+      "main": [
+        [
+          {
+            "node": "Update Contact in HubSpot",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Contact in HubSpot": {
+      "main": [
+        [
+          {
+            "node": "Prepare Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Email Notification": {
+      "main": [
+        [
+          {
+            "node": "Send Sales Alert Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "1"
+}

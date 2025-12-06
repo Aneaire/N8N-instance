@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   n8n:
     image: docker.n8n.io/n8nio/n8n
@@ -12,10 +14,32 @@ services:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://localhost:5678/
+      - WEBHOOK_URL=${WEBHOOK_BASE_URL:-http://localhost:5678/}
       - GENERIC_TIMEZONE=${TIMEZONE:-America/New_York}
+      - N8N_SECURE_COOKIE_HTTP_ONLY=false
+      - HUBSPOT_PRIVATE_APP_TOKEN=${HUBSPOT_PRIVATE_APP_TOKEN}
+      - HUBSPOT_API_KEY=${HUBSPOT_API_KEY}
     volumes:
       - n8n_data:/home/node/.n8n
+      - ./workflows:/home/node/.n8n/workflows
+    networks:
+      - n8n_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: n8n_redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - n8n_network
 
 volumes:
   n8n_data:
+  redis_data:
+
+networks:
+  n8n_network:
+    driver: bridge
