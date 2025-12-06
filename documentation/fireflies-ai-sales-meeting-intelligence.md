@@ -4,7 +4,7 @@
 
 This n8n workflow automatically analyzes sales meeting transcripts from Fireflies.ai using AI and sends intelligent email summaries to your sales team. It processes meetings in real-time when they complete, extracting actionable sales intelligence without storing any data permanently.
 
-![Fireflies AI Sales Meeting Intelligence Workflow](https://github.com/Aneaire/N8N-instance/blob/main/images/fireflies.png)
+![Fireflies AI Sales Meeting Intelligence Workflow](https://raw.githubusercontent.com/Aneaire/N8N-instance/blob/main/images/fireflies.png)
 
 ## Workflow Architecture
 
