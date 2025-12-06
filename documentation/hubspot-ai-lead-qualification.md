@@ -4,6 +4,8 @@
 
 This n8n workflow automates lead qualification and scoring using HubSpot CRM data and AI analysis to identify sales-ready leads. It processes contacts in real-time via webhooks and through scheduled batch processing, calculating purchase intent using multiple data points and sending automated sales alerts.
 
+![HubSpot AI Lead Qualification Workflow](https://raw.githubusercontent.com/Aneaire/N8N-instance/main/images/hubspot.png)
+
 ## Workflow Architecture
 
 ### Dual Trigger System
