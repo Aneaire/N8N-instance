@@ -2,38 +2,9 @@
 
 This repository contains n8n workflow automation setup with AI-powered sales workflows for HubSpot lead qualification and Fireflies meeting intelligence.
 
-## 🚀 Deployment Options
+## 🚀 Live Instance
 
-### Railway (Recommended)
-[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/Aneaire/N8N-instance)
-
-**🚀 Live Demo:** [https://n8n-instance-production-9885.up.railway.app](https://n8n-instance-production-9885.up.railway.app)
-
-**One-click deployment:**
-1. Click the "Deploy on Railway" button above
-2. Connect your GitHub account
-3. Railway will automatically build and deploy n8n
-4. Configure environment variables in Railway dashboard
-
-**Manual Railway deployment:**
-```bash
-# Clone and deploy
-railway login
-railway link
-railway up
-```
-
-### Local Development
-```bash
-# Clone repository
-git clone https://github.com/Aneaire/N8N-instance.git
-cd N8N-instance
-
-# Start with docker-compose
-docker-compose up -d
-
-# Access at http://localhost:5678
-```
+**🌐 Production URL:** [https://n8n-instance-production-9885.up.railway.app](https://n8n-instance-production-9885.up.railway.app)
 
 ## 🤖 Available Workflows
 
