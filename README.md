@@ -1,6 +1,42 @@
-# HubSpot Lead Qualification System
+# N8N AI Sales Workflows
 
-This system automates lead qualification and scoring using HubSpot data and AI analysis to identify sales-ready leads.
+This repository contains n8n workflow automation setup with AI-powered sales workflows for HubSpot lead qualification and Fireflies meeting intelligence.
+
+## 🚀 Deployment Options
+
+### Railway (Recommended)
+[![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/new/template?template=https://github.com/Aneaire/N8N-instance)
+
+**One-click deployment:**
+1. Click the "Deploy on Railway" button above
+2. Connect your GitHub account
+3. Railway will automatically build and deploy n8n
+4. Configure environment variables in Railway dashboard
+
+**Manual Railway deployment:**
+```bash
+# Clone and deploy
+railway login
+railway link
+railway up
+```
+
+### Local Development
+```bash
+# Clone repository
+git clone https://github.com/Aneaire/N8N-instance.git
+cd N8N-instance
+
+# Start with docker-compose
+docker-compose up -d
+
+# Access at http://localhost:5678
+```
+
+## 🤖 Available Workflows
+
+### 1. HubSpot AI Lead Qualification System
+Automates lead qualification and scoring using HubSpot data and AI analysis to identify sales-ready leads.
 
 ## 🚀 Features
 
@@ -244,5 +280,43 @@ Enable debug logging in n8n workflows to trace issues and optimize performance.
 
 For issues with:
 - **HubSpot API**: Check HubSpot developer documentation
+- **Fireflies API**: Check Fireflies developer documentation
 - **n8n workflows**: Review n8n community forums
+- **Railway deployment**: Check Railway documentation
 - **Custom logic**: Consult the workflow execution logs
+
+---
+
+## 🎙️ Fireflies AI Sales Meeting Intelligence
+
+This workflow automatically analyzes sales meeting transcripts from Fireflies.ai using AI and sends intelligent email summaries to your sales team.
+
+### Key Features
+- **Real-time Meeting Analysis**: Processes meetings when they complete
+- **AI-Powered Intelligence**: Extracts deal status, buying signals, objections, and action items
+- **Automated Email Reports**: Sends formatted intelligence summaries
+- **Ephemeral Processing**: No data storage for privacy compliance
+- **Batch Processing**: Handles multiple meetings simultaneously
+
+### Setup Requirements
+1. **Fireflies.ai Account**: With API access enabled
+2. **Webhook Configuration**: Pointing to your n8n instance
+3. **SMTP Email**: For sending sales team notifications
+4. **Google Gemini API**: For AI analysis
+
+### Workflow Flow
+1. **Webhook Trigger** → Receives meeting completion notifications
+2. **Fetch Transcripts** → Retrieves meeting data via Fireflies API
+3. **AI Analysis** → Processes transcripts with Gemini AI
+4. **Email Generation** → Creates professional intelligence reports
+5. **Team Notification** → Delivers insights to sales team
+
+### Analysis Capabilities
+- **Deal Status**: Current stage and close probability
+- **Buying Signals**: Interest indicators and positive signals
+- **Objections**: Concerns and blocking factors
+- **Action Items**: Commitments and follow-up tasks
+- **Sentiment**: Overall meeting tone and engagement
+- **Recommendations**: Specific sales actions and urgency levels
+
+For detailed setup instructions, see [FIREFLIES_SETUP.md](FIREFLIES_SETUP.md).
